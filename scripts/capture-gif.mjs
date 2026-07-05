@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer'
+import { chromium } from 'playwright'
 import { mkdir, rm } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
@@ -9,10 +9,10 @@ const root = path.resolve(__dirname, '..')
 const framesDir = path.join(root, 'scripts', '.frames')
 const outGif = path.join(root, 'motion-demo.gif')
 
-const WIDTH = 900
-const HEIGHT = 900
-const FPS = 12
-const DURATION_SEC = 8
+const WIDTH = 600
+const HEIGHT = 600
+const FPS = 8
+const DURATION_SEC = 6
 const FRAME_COUNT = FPS * DURATION_SEC
 const FRAME_DELAY_MS = 1000 / FPS
 const URL = 'http://localhost:5173'
@@ -31,17 +31,16 @@ function startDevServer() {
     let output = ''
     const onData = (chunk) => {
       output += chunk.toString()
-      if (output.includes('Local:') || output.includes('5173')) {
-        proc.stdout.off('data', onData)
-        proc.stderr.off('data', onData)
+      if (output.includes('5173')) {
+        proc.stdout?.off('data', onData)
+        proc.stderr?.off('data', onData)
         resolve(proc)
       }
     }
 
-    proc.stdout.on('data', onData)
-    proc.stderr.on('data', onData)
+    proc.stdout?.on('data', onData)
+    proc.stderr?.on('data', onData)
     proc.on('error', reject)
-
     setTimeout(() => reject(new Error('Dev server timeout')), 20000)
   })
 }
@@ -50,15 +49,17 @@ async function captureFrames() {
   await rm(framesDir, { recursive: true, force: true })
   await mkdir(framesDir, { recursive: true })
 
-  const browser = await puppeteer.launch({
+  const browser = await chromium.launch({
+    channel: 'chrome',
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
   })
 
   try {
-    const page = await browser.newPage()
-    await page.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 })
-    await page.goto(URL, { waitUntil: 'networkidle0', timeout: 30000 })
+    const page = await browser.newPage({
+      viewport: { width: WIDTH, height: HEIGHT },
+      deviceScaleFactor: 1,
+    })
+    await page.goto(URL, { waitUntil: 'networkidle', timeout: 30000 })
     await wait(400)
 
     for (let i = 0; i < FRAME_COUNT; i++) {
@@ -86,7 +87,10 @@ from PIL import Image
 frames_dir = Path(${JSON.stringify(framesDir)})
 out = Path(${JSON.stringify(outGif)})
 frames = sorted(frames_dir.glob('frame-*.png'))
-images = [Image.open(f).convert('P', palette=Image.Palette.ADAPTIVE, colors=256) for f in frames]
+images = []
+for f in frames:
+    img = Image.open(f).convert('RGB').resize((600, 600), Image.LANCZOS)
+    images.append(img.quantize(colors=64))
 images[0].save(
     out,
     save_all=True,
